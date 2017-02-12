@@ -2,9 +2,9 @@ package main
 
 import (
     "os"
-    "fmt"
     "log"
     "path"
+    "bytes"
     "bufio"
     "strconv"
     "strings"
@@ -18,6 +18,7 @@ import (
 )
 
 const maxGooglePhotoImageSize int = 70 * 1024 * 1024
+var endMarker = []byte("<<••—{Th¡sIs±The†For" + "GooglePhotosStorage…}—••>>") // 8 bytes
 
 type args struct {
   Encode string `arg:"-e,help: encode file to PNG"`
@@ -43,11 +44,11 @@ func encodeFile(inputFile string, destination string) {
   buf := make([]byte, 8)
 
   var part int = 0
+  var writeIndexMarker int = 0
   var bytesRead int = 0
 
   for {
 
-    log.Println("START PART", part)
     loopAgain := false
 
     // Create the image object
@@ -61,23 +62,19 @@ func encodeFile(inputFile string, destination string) {
     // Loop
     for {
       if bytesRead + 8 - (maxGooglePhotoImageSize * part) > maxGooglePhotoImageSize {
-        fmt.Println("TOO MUCH", bytesRead, maxGooglePhotoImageSize)
         loopAgain = true
-        // Set the reader at corret position
         break
       }
       count, _ := inputFileReader.Read(buf)
       bytesRead += count
-      if count == 0{
-        fmt.Println("THE EOF, ending", bytesRead)
-        break
-      }
-      // Calculate the pixel color
-      var sliceBuf = make([]byte, 0, 8)
-      sliceBuf = buf
-      // For all not read, complete with 0
       for i := count; i < 8; i ++ {
-        sliceBuf[i] = 0
+        // EOF, complete with end marker
+        buf[i] = endMarker[writeIndexMarker]
+        writeIndexMarker++
+        if (writeIndexMarker == 64) {
+          writeIndexMarker = -1
+          break
+        }
       }
       pixelColor := color.NRGBA64{
         binary.BigEndian.Uint16(buf[0:2]),
@@ -87,6 +84,9 @@ func encodeFile(inputFile string, destination string) {
       }
       // Set it
       outputImage.Set(x, y, pixelColor)
+      if writeIndexMarker == -1 {
+        break
+      }
       // Update the next pixel position
       x++
       if (x >= maxX) {
@@ -94,9 +94,9 @@ func encodeFile(inputFile string, destination string) {
         y++
       }
     }
-    part += 1
 
     // Choose the name
+    part += 1
     var outputImageName string
     if (!loopAgain && part == 1) {
       outputImageName = outputImageBaseName + ".png"
@@ -105,7 +105,6 @@ func encodeFile(inputFile string, destination string) {
     }
 
     // The file (part) destination
-    log.Println("Writing to", outputImageName)
     outputFile, err := os.OpenFile(outputImageName,
       os.O_WRONLY|os.O_TRUNC|os.O_CREATE,0600,)
     if err != nil {
@@ -120,7 +119,6 @@ func encodeFile(inputFile string, destination string) {
     }
 
   } // While Part(s)
-  fmt.Println("TOTAL", bytesRead)
 
 }
 
@@ -141,7 +139,6 @@ func decodeFile(files []string, destination string) {
 
 
   for indexFile, file := range files {
-    fmt.Println("NEW FILE")
 
     inputFile, err := os.Open(file)
     if err != nil {
@@ -158,20 +155,11 @@ func decodeFile(files []string, destination string) {
     inputImageD := image.NewNRGBA64(inputImageBounds)
     draw.Draw(inputImageD, inputImageBounds, inputImage, inputImageBounds.Min, draw.Src)
     inputBuffer := inputImageD.Pix
-
-    isSliceAllZero := func(slice []uint8) bool {
-      for _, value := range slice {
-        if value != 0 {
-          return false
-        }
-      }
-      return true
-    }
     
     if (lastIndexFile == indexFile) { // We need to check the EOF
       inputBufferCleaned := make([]byte, 0, len(inputBuffer))
       for index, value := range inputBuffer {
-        if value == 0 && isSliceAllZero(inputBuffer[index+1:index+10000])  {
+        if value == endMarker[0] && bytes.Equal(inputBuffer[index:index+64], endMarker) {
           break
         } else {
           inputBufferCleaned = append(inputBufferCleaned, value)
@@ -195,12 +183,10 @@ func decodeFile(files []string, destination string) {
         log.Fatal(err)
     }
     f.Close()
-    fmt.Println("For this part, this bytes", tmpBytesWritten)
     bytesWritten += tmpBytesWritten
 
 
   } // End of loop encoded files
-  fmt.Println("Total Written", bytesWritten)
 }
 
 func (args) Version() string {
