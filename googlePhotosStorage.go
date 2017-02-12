@@ -17,6 +17,8 @@ import (
     "github.com/alexflint/go-arg"
 )
 
+const maxGooglePhotoImageSize int = 70 * 1024 * 1024
+
 type args struct {
   Encode string `arg:"-e,help: encode file to PNG"`
   Decode []string `arg:"-d,help: decode file from PNG"`
@@ -28,8 +30,7 @@ func encodeFile(inputFile string, destination string) {
   // Max size for Google Photos
   const maxWidth int = 4614
   const maxHeight int = 3464
-  const maxImageBytes int = maxWidth * maxHeight * 8
-  fmt.Println("KK", maxImageBytes)
+
   outputImageBaseName := destination + "/" + path.Base(inputFile) + ".GooglePhotosStorage"
   
   // Open the file to encode
@@ -59,8 +60,8 @@ func encodeFile(inputFile string, destination string) {
 
     // Loop
     for {
-      if bytesRead + 8 - (maxImageBytes * part) > maxImageBytes {
-        fmt.Println("TOO MUCH", bytesRead, maxImageBytes)
+      if bytesRead + 8 - (maxGooglePhotoImageSize * part) > maxGooglePhotoImageSize {
+        fmt.Println("TOO MUCH", bytesRead, maxGooglePhotoImageSize)
         loopAgain = true
         // Set the reader at corret position
         break
@@ -136,6 +137,8 @@ func decodeFile(files []string, destination string) {
   f.Close()
 
   lastIndexFile := len(files) - 1
+  var bytesWritten int = 0
+
 
   for indexFile, file := range files {
     fmt.Println("NEW FILE")
@@ -168,13 +171,15 @@ func decodeFile(files []string, destination string) {
     if (lastIndexFile == indexFile) { // We need to check the EOF
       inputBufferCleaned := make([]byte, 0, len(inputBuffer))
       for index, value := range inputBuffer {
-        if value == 0 && isSliceAllZero(inputBuffer[index+1:index+100])  {
+        if value == 0 && isSliceAllZero(inputBuffer[index+1:index+10000])  {
           break
         } else {
           inputBufferCleaned = append(inputBufferCleaned, value)
         }
       }
       inputBuffer = inputBufferCleaned
+    } else {
+      inputBuffer = inputBuffer[:maxGooglePhotoImageSize]
     }
 
     f, err := os.OpenFile(
@@ -185,14 +190,17 @@ func decodeFile(files []string, destination string) {
     if err != nil {
         log.Fatal(err)
     }
-    bytesWritten, err := f.Write(inputBuffer)
+    tmpBytesWritten, err := f.Write(inputBuffer)
     if err != nil {
         log.Fatal(err)
     }
     f.Close()
-    fmt.Println(bytesWritten)
+    fmt.Println("For this part, this bytes", tmpBytesWritten)
+    bytesWritten += tmpBytesWritten
+
 
   } // End of loop encoded files
+  fmt.Println("Total Written", bytesWritten)
 }
 
 func (args) Version() string {
