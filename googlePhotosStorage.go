@@ -5,8 +5,9 @@ import (
     "fmt"
     "log"
     "path"
-    "strconv"
     "bufio"
+    "strconv"
+    "strings"
     "encoding/binary"
     "image"
     "image/color"
@@ -27,7 +28,8 @@ func encodeFile(inputFile string, destination string) {
   // Max size for Google Photos
   const maxWidth int = 4614
   const maxHeight int = 3464
-  const maxImageBytes int = maxWidth * maxWidth * 8
+  const maxImageBytes int = maxWidth * maxHeight * 8
+  fmt.Println("KK", maxImageBytes)
   outputImageBaseName := destination + "/" + path.Base(inputFile) + ".GooglePhotosStorage"
   
   // Open the file to encode
@@ -58,15 +60,15 @@ func encodeFile(inputFile string, destination string) {
     // Loop
     for {
       if bytesRead + 8 - (maxImageBytes * part) > maxImageBytes {
-        fmt.Println("TOO MUCH", bytesRead)
+        fmt.Println("TOO MUCH", bytesRead, maxImageBytes)
         loopAgain = true
         // Set the reader at corret position
         break
       }
-
       count, _ := inputFileReader.Read(buf)
       bytesRead += count
       if count == 0{
+        fmt.Println("THE EOF, ending", bytesRead)
         break
       }
       // Calculate the pixel color
@@ -123,7 +125,9 @@ func encodeFile(inputFile string, destination string) {
 
 func decodeFile(files []string, destination string) {
 
-  outputFileName := destination + "/OUT"
+  name := path.Base(files[0])
+  baseName := name[0:strings.LastIndex(name, ".GooglePhotosStorage")]
+  outputFileName := destination + "/" + baseName
   f, err := os.OpenFile(outputFileName, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0600)
   if err != nil {
       panic(err)
