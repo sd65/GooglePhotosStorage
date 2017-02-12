@@ -6,6 +6,7 @@ import (
     "fmt"
     "path"
     "bytes"
+    "math"
     "bufio"
     "strconv"
     "strings"
@@ -19,9 +20,12 @@ import (
 )
 
 // The max bytes Google Photos accepts to upload
-const maxGooglePhotoImageSize int = 70 * 1024 * 1024
-// The end marker append to the picture files
-var endMarker = []byte("<<••—{Th¡sIs±The†For" + "GooglePhotosStorage…}—••>>") // 8 bytes
+const maxImgSize int = 70 * 1024 * 1024
+// The end marker to append to the picture files (8 bytes)
+var endMarker = []byte(
+  "<<••—{Th¡sIs±The†For" + 
+  "GooglePhotosStorage…}—••>>",
+)
 
 // For args parsing
 type args struct {
@@ -43,11 +47,9 @@ func (args) Description() string {
 
 func encodeFile(inputFile string, destination string) {
 
-  // Make a square
-  const size int = 3030
-
   // Get the name
-  outputImageBaseName := destination + "/" + path.Base(inputFile) + ".GooglePhotosStorage"
+  outputImageBaseName := destination + "/"
+  outputImageBaseName += path.Base(inputFile) + ".GooglePhotosStorage"
   
   // Open the file to encode
   fmt.Printf("Opening %s to encode it...\n", inputFile)
@@ -56,7 +58,18 @@ func encodeFile(inputFile string, destination string) {
     panic(err)
   }
   defer tmpInputFileReader.Close()
+  inputFileInfo, err := tmpInputFileReader.Stat()
+  if err != nil {
+    panic(err)
+  }
   inputFileReader := bufio.NewReader(tmpInputFileReader)
+
+  // Make a square
+  pixelsNeeded := (inputFileInfo.Size() + (int64(len(endMarker)/8))) / 4
+  size := int(math.Sqrt(float64(pixelsNeeded))) + 1
+  if (size > 3030) {
+    size = 3030
+  }
 
   // Prepare the buffer
   buf := make([]byte, 8)
@@ -67,6 +80,10 @@ func encodeFile(inputFile string, destination string) {
   var bytesRead int = 0 // A total of bytes read
 
   for { // Loop for each picture file created
+    if part != 0 {
+      fmt.Println("Creating the image part %d", part)
+      
+    }
 
     loopAgain := false // By default, one Picture is enough
 
@@ -81,8 +98,7 @@ func encodeFile(inputFile string, destination string) {
     // Loop on buffer read
     for {
       // If inputFile too large, make another image
-      if bytesRead + 8 - (maxGooglePhotoImageSize * part) > maxGooglePhotoImageSize {
-        fmt.Println("This file is too large, we will create another image.")
+      if bytesRead + 8 - (maxImgSize * part) > maxImgSize {
         loopAgain = true
         break
       }
@@ -125,7 +141,8 @@ func encodeFile(inputFile string, destination string) {
     if (!loopAgain && part == 1) {
       outputImageName = outputImageBaseName + ".png"
     } else {
-      outputImageName = outputImageBaseName + ".part" + strconv.Itoa(part) + ".png"
+      outputImageName = outputImageBaseName + ".part" 
+      outputImageName += strconv.Itoa(part) + ".png"
     }
 
     // Open the file destination
@@ -138,7 +155,7 @@ func encodeFile(inputFile string, destination string) {
     // Save the picture !
     fmt.Println("Encoding to PNG...")
     png.Encode(outputFile, outputImage)
-    fmt.Printf("Writing a picture to %s\n", outputImageName)
+    fmt.Printf("Writing picture to %s\n", outputImageName)
     outputFile.Close()
 
     // ...
@@ -158,7 +175,9 @@ func decodeFile(files []string, destination string) {
   outputFileName := destination + "/" + baseName
 
   // Open the destination file and truncate it
-  f, err := os.OpenFile(outputFileName, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0600)
+  f, err := os.OpenFile(outputFileName, 
+    os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0600,
+  )
   if err != nil {
       panic(err)
   }
@@ -180,13 +199,20 @@ func decodeFile(files []string, destination string) {
 
     inputImage, _, err := image.Decode(inputFile)
     if err != nil {
-        log.Fatal("Error while decoding the file. Is your file an PNG image created by this tool?")
+        log.Fatal("Error while decoding the file. " +
+          "Is your file an PNG image created by this tool?")
     }
 
     // Picture to array
     inputImageBounds := inputImage.Bounds()
     inputImageD := image.NewNRGBA64(inputImageBounds)
-    draw.Draw(inputImageD, inputImageBounds, inputImage, inputImageBounds.Min, draw.Src)
+    draw.Draw(
+      inputImageD, 
+      inputImageBounds, 
+      inputImage, 
+      inputImageBounds.Min, 
+      draw.Src,
+    )
     inputBuffer := inputImageD.Pix
     
     if (lastIndexFile == indexFile) { // We need to check the EOF
@@ -201,7 +227,7 @@ func decodeFile(files []string, destination string) {
       inputBuffer = inputBufferCleaned
     } else {
       // Write the whole file
-      inputBuffer = inputBuffer[:maxGooglePhotoImageSize]
+      inputBuffer = inputBuffer[:maxImgSize]
     }
 
     // Re-open the file in append mode
@@ -245,7 +271,7 @@ func main() {
 
     // Checking
     if args.Encode == "" && len(args.Decode) == 0 || args.Encode != "" && len(args.Decode) != 0 {
-    p.Fail("you must provide one of --encode and --decode")
+      p.Fail("you must provide one of --encode and --decode")
     }
 
     // Switch action + additional checks
