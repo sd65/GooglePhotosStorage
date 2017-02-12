@@ -165,13 +165,16 @@ func decodeFile(files []string, destination string) {
       return true
     }
     
-    inputBufferCleaned := make([]byte, 0, len(inputBuffer))
-    for index, value := range inputBuffer {
-      if value == 0 && lastIndexFile == indexFile && isSliceAllZero(inputBuffer[index+1:index+10])  {
-        break
-      } else {
-        inputBufferCleaned = append(inputBufferCleaned, value)
+    if (lastIndexFile == indexFile) { // We need to check the EOF
+      inputBufferCleaned := make([]byte, 0, len(inputBuffer))
+      for index, value := range inputBuffer {
+        if value == 0 && isSliceAllZero(inputBuffer[index+1:index+100])  {
+          break
+        } else {
+          inputBufferCleaned = append(inputBufferCleaned, value)
+        }
       }
+      inputBuffer = inputBufferCleaned
     }
 
     f, err := os.OpenFile(
@@ -182,7 +185,7 @@ func decodeFile(files []string, destination string) {
     if err != nil {
         log.Fatal(err)
     }
-    bytesWritten, err := f.Write(inputBufferCleaned)
+    bytesWritten, err := f.Write(inputBuffer)
     if err != nil {
         log.Fatal(err)
     }
