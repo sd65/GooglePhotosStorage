@@ -6,7 +6,7 @@ import (
     "log"
     "path"
     "strconv"
-    "io/ioutil"
+    "bufio"
     "encoding/binary"
     "image"
     "image/color"
@@ -27,92 +27,111 @@ func encodeFile(inputFile string, destination string) {
   // Max size for Google Photos
   const maxWidth int = 4614
   const maxHeight int = 3464
-  const maxImageSize int = maxWidth * maxWidth * 8
+  const maxImageBytes int = maxWidth * maxWidth * 8
+  outputImageBaseName := destination + "/" + path.Base(inputFile) + ".GooglePhotosStorage"
   
   // Open the file to encode
-  inputBufferArray, err := ioutil.ReadFile(inputFile)
+  tmpInputFileReader, err := os.Open(inputFile)
   if err != nil {
     panic(err)
   }
-  inputBuffer := inputBufferArray[:]
+  defer tmpInputFileReader.Close()
+  inputFileReader := bufio.NewReader(tmpInputFileReader)
+  buf := make([]byte, 8)
 
-  // Utils
-  valueOrZeroOnSlice := func(slice *[]uint8, index int) uint8 {
-    if index >= len(*slice) {
-        fmt.Println("Out of range")
-        return 0
-    }
-    return (*slice)[index]
-  }
+  var part int = 0
+  var bytesRead int = 0
 
-  var part int64 = 0
-  var loopAgain bool = true
-  var basePart int = 0
+  for {
 
-  for loopAgain == true {
-    fmt.Println("START PART")
-
-    loopAgain = false // No do while...
+    log.Println("START PART", part)
+    loopAgain := false
 
     // Create the image object
     outputImage := image.NewNRGBA64(image.Rect(0, 0, maxWidth, maxHeight))
 
-    // The file (part) destination
-    outputFile, err := os.Create(destination + "/" + path.Base(inputFile) + ".GPS.part" + strconv.FormatInt(part, 10) + ".png")
-    if err != nil {
-        panic(err)
-    }
-    defer outputFile.Close()
+    // Vars for loop
+    x := 0
+    maxX:= outputImage.Bounds().Max.X
+    y := 0
 
     // Loop
-    var x int = 0
-    var y int = 0
-    for i := basePart; i < len(inputBuffer); i += 8 { // For each 8 bytes == 64 bits
-      if i - basePart > maxImageSize {
-         fmt.Println("TOO MUCH")
-         fmt.Println(basePart)
-         fmt.Println(i)
-         fmt.Println(maxImageSize)
-        // Too large !
+    for {
+      if bytesRead + 8 - (maxImageBytes * part) > maxImageBytes {
+        fmt.Println("TOO MUCH", bytesRead)
         loopAgain = true
-        basePart = i
-        part += 1
+        // Set the reader at corret position
+        break
+      }
+
+      count, _ := inputFileReader.Read(buf)
+      bytesRead += count
+      if count == 0{
         break
       }
       // Calculate the pixel color
-      var pixelValues = make([]uint16, 0, 4)
-      for y := 0; y < 8; y += 2 {
-        b1 := valueOrZeroOnSlice(&inputBuffer, i + y) 
-        b2 := valueOrZeroOnSlice(&inputBuffer, i + y + 1) 
-        tmpSlice := []byte{b1, b2}
-        pixelValues = append(pixelValues, binary.BigEndian.Uint16(tmpSlice))
+      var sliceBuf = make([]byte, 0, 8)
+      sliceBuf = buf
+      // For all not read, complete with 0
+      for i := count; i < 8; i ++ {
+        sliceBuf[i] = 0
       }
-      pixelColor := color.NRGBA64{pixelValues[0], pixelValues[1], pixelValues[2], pixelValues[3]}
+      pixelColor := color.NRGBA64{
+        binary.BigEndian.Uint16(buf[0:2]),
+        binary.BigEndian.Uint16(buf[2:4]),
+        binary.BigEndian.Uint16(buf[4:6]),
+        binary.BigEndian.Uint16(buf[6:8]),
+      }
       // Set it
       outputImage.Set(x, y, pixelColor)
       // Update the next pixel position
       x++
-      if (x >= outputImage.Bounds().Max.X) {
+      if (x >= maxX) {
         x = 0
         y++
       }
     }
+    part += 1
 
+    // Choose the name
+    var outputImageName string
+    if (!loopAgain && part == 1) {
+      outputImageName = outputImageBaseName + ".png"
+    } else {
+      outputImageName = outputImageBaseName + ".part" + strconv.Itoa(part) + ".png"
+    }
+
+    // The file (part) destination
+    log.Println("Writing to", outputImageName)
+    outputFile, err := os.OpenFile(outputImageName,
+      os.O_WRONLY|os.O_TRUNC|os.O_CREATE,0600,)
+    if err != nil {
+        panic(err)
+    }
     // Save the part !
     png.Encode(outputFile, outputImage)
+    outputFile.Close()
+
+    if (!loopAgain) {
+      break
+    }
 
   } // While Part(s)
+  fmt.Println("TOTAL", bytesRead)
+
 }
 
 func decodeFile(files []string, destination string) {
 
   outputFileName := destination + "/OUT"
-  f, err := os.OpenFile(outputFileName, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0777)
+  f, err := os.OpenFile(outputFileName, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0600)
   if err != nil {
       panic(err)
   }
   f.Write([]byte{})
   f.Close()
+
+  lastIndexFile := len(files) - 1
 
   for indexFile, file := range files {
     fmt.Println("NEW FILE")
@@ -144,18 +163,17 @@ func decodeFile(files []string, destination string) {
     
     inputBufferCleaned := make([]byte, 0, len(inputBuffer))
     for index, value := range inputBuffer {
-      if value == 0 && isSliceAllZero(inputBuffer[index+1:index+300])  {
+      if value == 0 && lastIndexFile == indexFile && isSliceAllZero(inputBuffer[index+1:index+10])  {
         break
       } else {
         inputBufferCleaned = append(inputBufferCleaned, value)
       }
     }
 
-
     f, err := os.OpenFile(
-        outputFileName + strconv.Itoa(indexFile),
-        os.O_WRONLY|os.O_APPEND | os.O_CREATE,
-        777,
+        outputFileName,
+        os.O_WRONLY| os.O_APPEND,
+        0600,
     )
     if err != nil {
         log.Fatal(err)
@@ -166,7 +184,6 @@ func decodeFile(files []string, destination string) {
     }
     f.Close()
     fmt.Println(bytesWritten)
-    //ioutil.WriteFile(outputFileName, inputBufferCleaned, os.ModeAppend | os.O_WRONLY)
 
   } // End of loop encoded files
 }
